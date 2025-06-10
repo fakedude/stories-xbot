@@ -1,5 +1,3 @@
-jest.mock('../src/config/env-config', () => ({ BOT_ADMIN_ID: 0, BOT_TOKEN: 't', LOG_FILE: '/tmp/test.log' }));
-
 import { isValidStoryLink } from '../src/lib/helpers';
 
 describe('isValidStoryLink', () => {
