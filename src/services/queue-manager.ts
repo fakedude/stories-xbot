@@ -1,0 +1,270 @@
+// src/services/queue-manager.ts
+
+import { BOT_ADMIN_ID } from 'config/env-config';
+import { getAllStoriesFx, getParticularStoryFx } from 'controllers/get-stories';
+import { sendStoriesFx } from 'controllers/send-stories';
+import {
+  cleanupQueueFx,
+  countPendingJobsFx,
+  countRecentUserRequestsFx,
+  enqueueDownloadFx,
+  findPendingJobFx,
+  getDownloadCooldownRemainingFx,
+  getNextQueueItemFx,
+  getQueueStatsFx,
+  isDuplicatePendingFx,
+  markDoneFx,
+  markErrorFx,
+  markProcessingFx,
+  recordUserRequestFx,
+  runMaintenanceFx,
+  wasRecentlyDownloadedFx,
+} from 'db/effects';
+import { bot } from 'index';
+import { sendTemporaryMessage } from 'lib';
+import { DownloadQueueItem, SendStoriesFxParams, UserInfo } from 'types';
+
+// How long we allow a job to run before considering it failed
+export const PROCESSING_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes for regular jobs
+export const PAGINATED_PROCESSING_TIMEOUT_MS = 5 * 60 * 1000; // half the time for paginated requests
+
+const COOLDOWN_HOURS = { free: 12, premium: 2, admin: 0 };
+
+function formatEta(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}m ${s}s`;
+}
+
+export async function getQueueStatusForUser(
+  telegram_id: string
+): Promise<string> {
+  const jobId = await findPendingJobFx(telegram_id);
+  if (!jobId) {
+    return '✅ You have no items in the queue.';
+  }
+  const { position, eta } = await getQueueStatsFx(jobId);
+  return `⏳ Queue position: ${position}. Estimated wait ${formatEta(eta)}.`;
+}
+
+function getCooldownHours({
+  isPremium,
+  isAdmin,
+}: {
+  isPremium?: boolean;
+  isAdmin?: boolean;
+}) {
+  if (isAdmin) return COOLDOWN_HOURS.admin;
+  if (isPremium) return COOLDOWN_HOURS.premium;
+  return COOLDOWN_HOURS.free;
+}
+
+export async function handleNewTask(user: UserInfo) {
+  const { chatId: telegram_id, link: target_username, nextStoriesIds } = user;
+  const is_admin = telegram_id === BOT_ADMIN_ID.toString();
+  const cooldown = getCooldownHours({
+    isPremium: user.isPremium,
+    isAdmin: is_admin,
+  });
+
+  try {
+    const isPaginatedRequest =
+      Array.isArray(nextStoriesIds) && nextStoriesIds.length > 0;
+
+    if (!is_admin && !isPaginatedRequest) {
+      const recent = await countRecentUserRequestsFx({
+        telegram_id,
+        window: 60,
+      });
+      if (recent >= 5) {
+        await sendTemporaryMessage(
+          bot,
+          telegram_id,
+          '🚫 Too many requests, please slow down.'
+        );
+        return;
+      }
+
+      const pending = await countPendingJobsFx(telegram_id);
+      if (pending >= 3) {
+        await sendTemporaryMessage(
+          bot,
+          telegram_id,
+          '🚫 You already have too many pending requests.'
+        );
+        return;
+      }
+
+      await recordUserRequestFx(telegram_id);
+    }
+
+    if (!isPaginatedRequest) {
+      if (
+        await wasRecentlyDownloadedFx({
+          telegram_id,
+          target_username,
+          hours: cooldown,
+        })
+      ) {
+        const remaining = await getDownloadCooldownRemainingFx({
+          telegram_id,
+          target_username,
+          hours: cooldown,
+        });
+        const h = Math.floor(remaining / 3600);
+        const m = Math.floor((remaining % 3600) / 60);
+        await sendTemporaryMessage(
+          bot,
+          telegram_id,
+          `⏳ You can request stories for "${target_username}" once every ${cooldown} hours.\nTry again in ${h}h ${m}m.`
+        );
+        return;
+      }
+    }
+
+    if (
+      await isDuplicatePendingFx({
+        telegram_id,
+        target_username,
+        nextStoriesIds,
+      })
+    ) {
+      await sendTemporaryMessage(
+        bot,
+        telegram_id,
+        `⚠️ This download is already in the queue.`
+      );
+      return;
+    }
+
+    const jobDetails: UserInfo = {
+      ...user,
+      storyRequestType:
+        Array.isArray(nextStoriesIds) && nextStoriesIds.length > 0
+          ? 'paginated'
+          : user.storyRequestType,
+      isPaginated: Array.isArray(nextStoriesIds) && nextStoriesIds.length > 0,
+    };
+
+    const delaySeconds = isPaginatedRequest ? 60 : 0;
+
+    const jobId = await enqueueDownloadFx({
+      telegram_id,
+      target_username,
+      task_details: jobDetails,
+      delaySeconds,
+    });
+    const { position, eta } = await getQueueStatsFx(jobId);
+    await sendTemporaryMessage(
+      bot,
+      telegram_id,
+      `✅ Your request for ${target_username} has been queued!\nPosition: ${position} | ETA: ${formatEta(eta)}`
+    );
+
+    setImmediate(processQueue);
+  } catch (error: any) {
+    console.error(
+      '[handleNewTask] Error during task validation/enqueueing:',
+      error
+    );
+    await bot.telegram.sendMessage(
+      telegram_id,
+      `❌ An error occurred while queueing your request.`
+    );
+  }
+}
+
+let isProcessing = false;
+
+export async function processQueue() {
+  if (isProcessing) {
+    return;
+  }
+
+  const job: DownloadQueueItem | null = await getNextQueueItemFx();
+
+  if (!job) {
+    console.log('[QueueManager] Queue is empty. Processor is idle.');
+    return;
+  }
+
+  isProcessing = true;
+  await markProcessingFx(job.id);
+
+  const currentTask: UserInfo = {
+    ...job.task,
+    chatId: job.chatId,
+    instanceId: job.id,
+  };
+
+  let timedOut = false;
+  const timeoutMs =
+    currentTask.storyRequestType === 'paginated'
+      ? PAGINATED_PROCESSING_TIMEOUT_MS
+      : PROCESSING_TIMEOUT_MS;
+
+  const timeoutId = setTimeout(async () => {
+    timedOut = true;
+    await markErrorFx({ jobId: job.id, message: 'Processing timeout' });
+    await sendTemporaryMessage(
+      bot,
+      job.chatId,
+      `❌ Your download for ${currentTask.link} failed. Reason: Processing timeout`
+    );
+    isProcessing = false;
+    setImmediate(processQueue);
+  }, timeoutMs);
+
+  try {
+    console.log(
+      `[QueueManager] Starting processing for ${currentTask.link} (Job ID: ${job.id})`
+    );
+
+    const storiesResult =
+      currentTask.linkType === 'username'
+        ? await getAllStoriesFx(currentTask)
+        : await getParticularStoryFx(currentTask);
+
+    if (typeof storiesResult === 'string') {
+      throw new TypeError(storiesResult);
+    }
+
+    const payload: SendStoriesFxParams = {
+      task: currentTask,
+      ...(storiesResult as object),
+    };
+    if (!timedOut) {
+      await sendStoriesFx(payload);
+      await markDoneFx(job.id);
+      console.log(
+        `[QueueManager] Finished processing for ${currentTask.link} (Job ID: ${job.id})`
+      );
+    }
+  } catch (error: any) {
+    if (!timedOut) {
+      console.error(
+        `[QueueManager] Error processing job ${job.id} for ${currentTask.link}:`,
+        error
+      );
+      await markErrorFx({
+        jobId: job.id,
+        message: error?.message || 'Unknown processing error',
+      });
+      await bot.telegram.sendMessage(
+        job.chatId,
+        `❌ Your download for ${currentTask.link} failed. Reason: ${error?.message || 'Unknown error'}`
+      );
+    }
+  } finally {
+    clearTimeout(timeoutId);
+    if (!timedOut) {
+      isProcessing = false;
+      await cleanupQueueFx();
+      await runMaintenanceFx();
+      setImmediate(processQueue);
+    } else {
+      await cleanupQueueFx();
+      await runMaintenanceFx();
+    }
+  }
+}

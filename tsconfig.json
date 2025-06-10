@@ -1,0 +1,60 @@
+{
+  "ts-node": {
+    "files": true
+  },
+  "compilerOptions": {
+    "types": [
+      "node",
+      "jest"
+    ],
+    "target": "ESNext",
+    "module": "commonjs",
+    "outDir": "dist",
+    "strict": true,
+    "noImplicitAny": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "strictPropertyInitialization": false,
+    "baseUrl": "./src", // Crucial: resolves non-relative imports from 'src'
+    "paths": {
+      "config/*": [
+        "config/*"
+      ],
+      "controllers/*": [
+        "controllers/*"
+      ],
+      "db/*": [
+        "db/*"
+      ],
+      "services/*": [
+        "services/*"
+      ],
+      "lib/*": [
+        "lib/*"
+      ],
+      "lib": [
+        "lib/index.ts"
+      ],
+      "repositories/*": [
+        "repositories/*"
+      ],
+      "types": [
+        "types.ts"
+      ], // Maps 'types' alias directly to src/types.ts
+      "index": [
+        "index.ts"
+      ] // Maps 'index' alias directly to src/index.ts
+    },
+    "rootDir": "./src", // Explicitly defines the root of your source files
+    "forceConsistentCasingInFileNames": true,
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "./types.d.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}
