@@ -1,0 +1,8 @@
+userbot-session
+dist
+
+node_modules
+.env
+.npm
+
+data/

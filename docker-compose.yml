@@ -1,0 +1,25 @@
+# This file makes running your bot much simpler.
+# You can start it with just `docker-compose up -d`.
+
+version: '3.8'
+
+services:
+  telegram-bot:
+    # This tells compose to build the image from the Dockerfile in the current directory.
+    build: .
+    # This sets a friendly name for your running container.
+    container_name: ghost-stories-bot
+    # This ensures the bot always restarts if it stops or if the server reboots.
+    restart: unless-stopped
+    # Load environment variables from the provided .env file.
+    env_file:
+      - .env
+    # This section passes the PUID and PGID to the entrypoint.sh script.
+    # It's set to your TrueNAS default of 568.
+    environment:
+      - PUID=568
+      - PGID=568
+    # This mounts your persistent data directory on the host to the /app/data
+    # directory inside the container.
+    volumes:
+      - ./storage_entry:/app/data

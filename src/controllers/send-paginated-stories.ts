@@ -1,0 +1,165 @@
+// src/controllers/send-paginated-stories.ts
+
+// Corrected import path for downloadStories and mapStories
+import { downloadStories, mapStories } from 'controllers/download-stories'; // <--- Corrected import path
+import { notifyAdmin } from 'controllers/send-message'; // <--- Corrected import path
+import { bot } from 'index'; // Corrected path to use tsconfig alias
+import { sendTemporaryMessage } from 'lib';
+import { Api } from 'telegram';
+// CORRECTED: Import types from your central types.ts file
+import {
+  MappedStoryItem,
+  NotifyAdminParams,
+  SendPaginatedStoriesArgs,
+} from 'types'; // <--- Corrected import path & added MappedStoryItem, NotifyAdminParams
+
+/**
+ * Sends paginated stories to the user (i.e., a batch/page of stories).
+ * @param stories - Array of story items to send.
+ * @param task    - User/task context.
+ */
+export async function sendPaginatedStories({
+  stories,
+  task,
+}: SendPaginatedStoriesArgs) {
+  // <--- Using the imported SendPaginatedStoriesArgs
+  // `mapStories` expects Api.TypeStoryItem[], and `stories` here is Api.TypeStoryItem[]
+  const mapped: MappedStoryItem[] = mapStories(stories); // <--- Explicitly typed mapped to MappedStoryItem[]
+
+  try {
+    // Notify user that download is starting
+    await sendTemporaryMessage(bot, task.chatId, '⏳ Downloading...').catch(
+      (error) => {
+        console.error(
+          `[sendPaginatedStories] Failed to send 'Downloading' message to ${task.chatId}:`,
+          error
+        );
+      }
+    );
+
+    // Download with activity timeout to avoid backlog
+    try {
+      const controller = new AbortController();
+      let lastProgress = Date.now();
+      const onProgress = () => {
+        lastProgress = Date.now();
+      };
+
+      const globalTimeout = setTimeout(() => controller.abort(), 300000); // 5 min
+      const activityInterval = setInterval(() => {
+        if (Date.now() - lastProgress > 30000) {
+          controller.abort();
+        }
+      }, 5000);
+
+      await downloadStories(mapped, 'pinned', onProgress, controller.signal);
+
+      clearTimeout(globalTimeout);
+      clearInterval(activityInterval);
+
+      if (controller.signal.aborted) {
+        throw new Error('Download timed out');
+      }
+    } catch (error) {
+      await sendTemporaryMessage(
+        bot,
+        task.chatId,
+        '❌ Download timed out. Please try again later.'
+      ).catch(() => {
+        /* ignore */
+      });
+      throw error;
+    }
+
+    // Filter only those stories which have a buffer (media) and are not too large
+    const uploadableStories: MappedStoryItem[] = mapped.filter(
+      // <--- Explicitly typed uploadableStories
+      (x) => x.buffer && x.bufferSize! <= 50 // skip too large files
+    );
+
+    if (uploadableStories.length > 0) {
+      // Notify user that upload is starting
+      await sendTemporaryMessage(
+        bot,
+        task.chatId,
+        '⏳ Uploading to Telegram...'
+      ).catch((error) => {
+        console.error(
+          `[sendPaginatedStories] Failed to send 'Uploading' message to ${task.chatId}:`,
+          error
+        );
+      });
+
+      const isSingle = uploadableStories.length === 1;
+
+      await bot.telegram.sendMediaGroup(
+        task.chatId,
+        uploadableStories.map((x) => ({
+          media: { source: x.buffer! },
+          type: x.mediaType,
+          caption: isSingle ? undefined : (x.caption ?? `Pinned story ${x.id}`),
+        }))
+      );
+
+      if (isSingle) {
+        const story = uploadableStories[0];
+        await sendTemporaryMessage(
+          bot,
+          task.chatId,
+          story.caption ?? `Pinned story ${story.id}`
+        ).catch((error) => {
+          console.error(
+            `[sendPaginatedStories] Failed to send temporary caption to ${task.chatId}:`,
+            error
+          );
+        });
+      }
+    } else {
+      await bot.telegram
+        .sendMessage(
+          task.chatId,
+          '❌ No paginated stories could be sent. They might be too large or none were found.'
+        )
+        .catch((error) => {
+          console.error(
+            `[sendPaginatedStories] Failed to notify ${task.chatId} about no stories:`,
+            error
+          );
+        });
+    }
+
+    // Notify admin for logging and monitoring
+    notifyAdmin({
+      status: 'info',
+      baseInfo: `📥 Paginated stories uploaded to user!`,
+    } as NotifyAdminParams); // <--- Added type assertion for notifyAdmin params
+  } catch (error) {
+    // <--- Error can be 'unknown' or 'any' if not specified
+    notifyAdmin({
+      status: 'error',
+      task,
+      errorInfo: { cause: error },
+    } as NotifyAdminParams); // <--- Added type assertion for notifyAdmin params
+    console.error(
+      '[sendPaginatedStories] Error occurred while sending paginated stories:',
+      error
+    );
+    try {
+      await bot.telegram
+        .sendMessage(
+          task.chatId,
+          'An error occurred while sending these stories. The admin has been notified.'
+        )
+        .catch((error_) => {
+          console.error(
+            `[sendPaginatedStories] Failed to notify ${task.chatId} about general error:`,
+            error_
+          );
+        });
+    } catch (_) {
+      /* ignore */
+    }
+    throw error; // Essential for Effector's .fail to trigger
+  }
+  // No Effector event triggers; queue manager will handle progression!
+}

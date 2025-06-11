@@ -1,0 +1,169 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "dev",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "dev"
+      ],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "build",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "build"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": [
+        "$tsc"
+      ]
+    },
+    {
+      "label": "lint",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "lint"
+      ],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": [
+        "$eslint-stylish"
+      ]
+    },
+    {
+      "label": "lint:fix",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "lint:fix"
+      ],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": [
+        "$eslint-stylish"
+      ]
+    },
+    {
+      "label": "process:stop",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "process:stop"
+      ],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "process:start",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "process:start"
+      ],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "deploy",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "deploy"
+      ],
+      "group": "build",
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "test",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "test"
+      ],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      },
+      "presentation": {
+        "echo": true,
+        "reveal": "always",
+        "focus": false,
+        "panel": "shared",
+        "showReuseMessage": true,
+        "clear": false
+      },
+      "problemMatcher": []
+    }
+  ]
+}

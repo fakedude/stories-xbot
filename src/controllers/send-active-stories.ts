@@ -1,0 +1,195 @@
+// src/controllers/send-active-stories.ts
+
+import { Userbot } from 'config/userbot';
+// Corrected import path for downloadStories and mapStories
+import { downloadStories, mapStories } from 'controllers/download-stories';
+import { notifyAdmin } from 'controllers/send-message';
+import { bot } from 'index'; // Corrected path to use tsconfig alias
+import { chunkMediafiles, sendTemporaryMessage } from 'lib';
+import { Markup } from 'telegraf';
+// CORRECTED: Import InlineKeyboardButton for precise typing
+import { InlineKeyboardButton } from 'telegraf/typings/core/types/typegram'; // <--- This import is key for fixing TS2724
+import { Api } from 'telegram';
+// CORRECTED: Import types from your central types.ts file
+import {
+  MappedStoryItem,
+  NotifyAdminParams,
+  SendStoriesArgs,
+  StoriesModel,
+} from 'types';
+
+/**
+ * Sends a user's active stories as Telegram media groups.
+ * Handles pagination, download, error reporting, and premium up-sell.
+ */
+export async function sendActiveStories({ stories, task }: SendStoriesArgs) {
+  // `stories` here is expected to be `MappedStoryItem[]` from SendStoriesArgs
+  let mapped: StoriesModel = stories; // Explicitly typed mapped to StoriesModel (MappedStoryItem[])
+
+  // === Pagination logic for >5 stories (per page) ===
+  let hasMorePages = false;
+  const nextStories: Record<string, number[]> = {};
+  const PER_PAGE = 5;
+
+  if (stories.length > PER_PAGE) {
+    hasMorePages = true;
+    const currentStories: MappedStoryItem[] = mapped.slice(0, PER_PAGE); // Explicitly typed
+    for (let i = PER_PAGE; i < mapped.length; i += PER_PAGE) {
+      const from = i + 1;
+      const to = Math.min(i + PER_PAGE, mapped.length);
+      // CORRECTED LINE: Removed LaTeX delimiters and used template literal correctly
+      nextStories[`${from}-${to}`] = mapped
+        .slice(i, i + PER_PAGE)
+        .map((x: MappedStoryItem) => x.id); // <--- 'x' is typed here
+    }
+    mapped = currentStories;
+  }
+
+  // === If any stories missing media, refetch via Userbot ===
+  const storiesWithoutMedia: MappedStoryItem[] = mapped.filter(
+    (x: MappedStoryItem) => !x.media
+  ); // <--- 'x' is typed here
+  if (storiesWithoutMedia.length > 0) {
+    mapped = mapped.filter((x: MappedStoryItem) => Boolean(x.media)); // <--- 'x' is typed here
+    try {
+      const client = await Userbot.getInstance();
+      const entity = await client.getEntity(task.link!);
+      const ids = storiesWithoutMedia.map((x: MappedStoryItem) => x.id); // <--- 'x' is typed here
+      const storiesWithMediaApi = await client.invoke(
+        new Api.stories.GetStoriesByID({ id: ids, peer: entity })
+      );
+      mapped.push(...mapStories(storiesWithMediaApi.stories));
+    } catch (error) {
+      console.error(
+        '[sendActiveStories] Error re-fetching stories without media:',
+        error
+      );
+      // Fallback: just continue with those that have media
+    }
+  }
+
+  try {
+    // --- User notification: downloading ---
+    await sendTemporaryMessage(
+      bot,
+      task.chatId,
+      `⏳ Downloading Active stories from ${task.link}...`
+    ).catch((error) => {
+      console.error(
+        `[sendActiveStories] Failed to send 'Downloading Active stories' message to ${task.chatId}:`,
+        error
+      );
+    });
+
+    // --- Download stories to buffer ---
+    await downloadStories(mapped, 'active');
+
+    // --- Only upload files with buffer and size <= 47MB (Telegram API limit fudge) ---
+    const uploadableStories: MappedStoryItem[] = mapped.filter(
+      (x: MappedStoryItem) => x.buffer && x.bufferSize! <= 47 // <--- 'x' is typed here
+    );
+
+    // --- Notify user about upload ---
+    if (uploadableStories.length > 0) {
+      await sendTemporaryMessage(
+        bot,
+        task.chatId,
+        `📥 ${uploadableStories.length} Active stories from ${task.link} downloaded successfully!\n⏳ Uploading stories to Telegram...`
+      ).catch((error) => {
+        console.error(
+          `[sendActiveStories] Failed to send 'Uploading' message to ${task.chatId}:`,
+          error
+        );
+      });
+
+      // --- Send in chunks (albums) ---
+      const chunkedList = chunkMediafiles(uploadableStories);
+      for (const album of chunkedList) {
+        await bot.telegram.sendMediaGroup(
+          task.chatId,
+          album.map((x: MappedStoryItem) => ({
+            // <--- 'x' is typed here
+            media: { source: x.buffer! },
+            type: x.mediaType,
+            caption: x.caption ?? undefined,
+          }))
+        );
+        await sendTemporaryMessage(
+          bot,
+          task.chatId,
+          `Active story from ${task.link}`
+        ).catch((error) => {
+          console.error(
+            `[sendActiveStories] Failed to send temporary caption to ${task.chatId}:`,
+            error
+          );
+        });
+      }
+    } else {
+      await bot.telegram.sendMessage(
+        task.chatId,
+        '❌ Cannot download Active stories, most likely they are too large to send via bot.'
+      );
+    }
+
+    // --- If more pages, offer buttons for the rest ---
+    if (hasMorePages) {
+      const btns = Object.entries(nextStories).map(
+        ([pages, nextStoriesIds]: [string, number[]]) => ({
+          text: `📥 ${pages} 📥`,
+          // CORRECTED LINE: Removed LaTeX delimiters and used template literal correctly
+          callback_data: `${task.link}&${JSON.stringify(nextStoriesIds)}`,
+        })
+      );
+      // Chunk 3 buttons per row
+      // CORRECTED: Explicitly typed 'acc' and 'curr' in reduce
+      const keyboard = btns.reduce(
+        (
+          acc: InlineKeyboardButton[][],
+          curr: InlineKeyboardButton,
+          index: number
+        ) => {
+          // <--- Types fixed here
+          const chunkIndex = Math.floor(index / 3);
+          if (!acc[chunkIndex]) acc[chunkIndex] = [];
+          acc[chunkIndex].push(curr);
+          return acc;
+        },
+        []
+      );
+      await bot.telegram.sendMessage(
+        task.chatId,
+        `Uploaded ${PER_PAGE}/${stories.length} active stories from ${task.link} ✅`,
+        Markup.inlineKeyboard(keyboard)
+      );
+    }
+
+    notifyAdmin({
+      status: 'info',
+      baseInfo: `📥 ${uploadableStories.length} Active stories uploaded to user!`,
+    } as NotifyAdminParams);
+  } catch (error: any) {
+    notifyAdmin({
+      task,
+      status: 'error',
+      errorInfo: { cause: error },
+    } as NotifyAdminParams);
+    console.error('[sendActiveStories] Error sending ACTIVE stories:', error);
+    try {
+      await bot.telegram
+        .sendMessage(
+          task.chatId,
+          'An error occurred while sending stories. The admin has been notified.'
+        )
+        .catch((error_) => {
+          console.error(
+            `[sendActiveStories] Failed to notify ${task.chatId} about general error:`,
+            error_
+          );
+        });
+    } catch (_) {
+      /* ignore */
+    }
+    throw error;
+  }
+}
