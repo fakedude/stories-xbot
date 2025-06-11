@@ -47,10 +47,10 @@ RUN adduser --system --uid 1001 --ingroup appgroup --shell /bin/sh appuser
 # =========================================================================
 # Copy and build the application
 # =========================================================================
-COPY package.json yarn.lock ./
-RUN yarn install
+COPY package.json package-lock.json* ./
+RUN npm ci --only=production
 COPY . .
-RUN yarn build
+RUN npm run build
 
 # =========================================================================
 # Set up environment and permissions

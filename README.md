@@ -33,7 +33,7 @@
   <tr>
     <td><img src="assets/happy-path.png" alt="downloading happy path"></td>
     <td><img src="assets/progress-info.png" alt="downloading progress info"></td>
-	</tr>
+ </tr>
   <tr>
     <td><img src="assets/direct-link.png" alt="downloading via direct link"></td>
     <td><img src="assets/error.png" alt="wrong command use cases"></td>
@@ -159,11 +159,13 @@ bot.telegram.sendMediaGroup(
    - <code>USERBOT_PHONE_NUMBER</code> – the phone number of the account that will act as the userbot.
    - Optional: <code>USERBOT_PASSWORD</code> if that account has two‑factor authentication enabled.
    - Leave <code>USERBOT_PHONE_CODE</code> empty for the first run.
-  - Fill in <code>BOT_ADMIN_ID</code>, and either <code>BTC_WALLET_ADDRESS</code>, <code>BTC_XPUB</code>, <code>BTC_YPUB</code>, or <code>BTC_ZPUB</code>.
+
+- Fill in <code>BOT_ADMIN_ID</code>, and either <code>BTC_WALLET_ADDRESS</code>, <code>BTC_XPUB</code>, <code>BTC_YPUB</code>, or <code>BTC_ZPUB</code>.
     If an extended public key is provided via <code>BTC_XPUB</code>, <code>BTC_YPUB</code> or <code>BTC_ZPUB</code>, it takes precedence and new invoices
     will derive unique addresses from it.
-  - Optional: <code>LOG_FILE</code> to change where runtime errors are logged (defaults to <code>./data/error.log</code>).
-  - Optional: <code>DEBUG_LOG_FILE</code> to also store verbose debug logs on disk. Leave empty to disable file logging.
+- Optional: <code>LOG_FILE</code> to change where runtime errors are logged (defaults to <code>./data/error.log</code>).
+- Optional: <code>DEBUG_LOG_FILE</code> to also store verbose debug logs on disk. Leave empty to disable file logging.
+
 2. Build and start the container:
 
 ```shell
@@ -187,27 +189,14 @@ Just send a message to the bot with the desired Telegram username, phone number,
 
 ### Monitoring Profiles
 
-Free users cannot monitor profiles. Premium users can monitor up to **5** profiles for new stories, while admins have no limit. Each monitored account is checked every **6 hours** on its own schedule. Use `/monitor <@username|+19875551234>` to add a profile by username or phone number (digits only, no hyphens), and `/unmonitor <@username>` to remove one. After adding a monitor, the bot tells you how many slots you have left. Send `/monitor` or `/unmonitor` without arguments to see your current list.
-
-### Manual Payment Verification
-
-After sending your upgrade payment, you can speed up confirmation by verifying it manually.
-Obtain the transaction hash (TXID) from your wallet and run:
-
-```
-/verify <txid>
-```
-
-The bot checks the blockchain immediately and credits Premium time if the amount matches.
-You don't need to send your own Bitcoin address—verification uses the TXID alone.
-The TXID (sometimes called transaction hash) looks like `2d339983a78206050b4d70c15c5e14a3553438b25caedebdf2bb2f7162e33d59`.
+All users can monitor profiles for new stories. Each monitored account is checked every **6 hours** on its own schedule. Use `/monitor <@username|+19875551234>` to add a profile by username or phone number (digits only, no hyphens), and `/unmonitor <@username>` to remove one. Send `/monitor` or `/unmonitor` without arguments to see your current list.
 
 ## Development
 
 Before running any build or lint commands, install dependencies:
 
 ```shell
-yarn install
+npm install
 # or
 ./setup.sh
 ```
@@ -215,11 +204,11 @@ yarn install
 ### Build
 
 ```shell
-yarn build
+npm run build
 ```
 
 ### Lint
 
 ```shell
-yarn lint
+npm run lint
 ```

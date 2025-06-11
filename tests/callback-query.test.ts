@@ -19,22 +19,17 @@ jest.mock('../src/services/monitor-service', () => ({
   MAX_MONITORS_PER_USER: 1,
 }));
 
-jest.mock('../src/services/btc-payment', () => ({
-  schedulePaymentCheck: jest.fn(),
-  resumePendingChecks: jest.fn(),
-  setBotInstance: jest.fn(),
-  verifyPaymentByTxid: jest.fn(),
-}));
-
 jest.mock('../src/services/premium-service', () => ({
   isUserPremium: jest.fn().mockReturnValue(true),
   addPremiumUser: jest.fn(),
   removePremiumUser: jest.fn(),
   extendPremium: jest.fn(),
-  getPremiumDaysLeft: jest.fn().mockReturnValue(0),
+  getPremiumDaysLeft: jest.fn().mockReturnValue(Infinity),
 }));
 
-jest.mock('../src/repositories/user-repository', () => ({ saveUser: jest.fn() }));
+jest.mock('../src/repositories/user-repository', () => ({
+  saveUser: jest.fn(),
+}));
 
 const handleNewTask = jest.fn();
 jest.mock('../src/services/queue-manager', () => ({ handleNewTask }));

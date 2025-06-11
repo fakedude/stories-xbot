@@ -53,14 +53,6 @@ export function getDailyStats() {
     "SELECT COUNT(*) as c FROM users WHERE strftime('%s', created_at) > ?",
     since
   );
-  const paidInvoices = countRows(
-    'SELECT COUNT(*) as c FROM payments WHERE paid_at IS NOT NULL AND paid_at > ?',
-    since
-  );
-  const invitesRedeemed = countRows(
-    'SELECT COUNT(*) as c FROM referrals WHERE created_at > ?',
-    since
-  );
 
   let errors = 0;
   try {
@@ -75,7 +67,7 @@ export function getDailyStats() {
     }
   } catch {}
 
-  return { newUsers, paidInvoices, invitesRedeemed, errors };
+  return { newUsers, errors };
 }
 
 function formatUptime(): string {
@@ -96,8 +88,6 @@ export function getStatusText(): string {
   return (
     `🕒 Uptime: ${formatUptime()}\n` +
     `New users: ${stats.newUsers}\n` +
-    `Payments: ${stats.paidInvoices}\n` +
-    `Invites redeemed: ${stats.invitesRedeemed}\n` +
     `Errors last 24h: ${stats.errors}\n` +
     `Queue: ${queueText}`
   );

@@ -17,16 +17,12 @@ import { UserInfo } from 'types';
 
 import {
   blockUser,
-  countReferrals,
   db,
-  findInviterByCode,
-  getOrCreateInviteCode,
   getSuspensionRemaining,
   isUserBlocked,
   isUserTemporarilySuspended,
   listBlockedUsers,
   recordInvalidLink,
-  recordReferral,
   resetStuckJobs,
   suspendUserTemp,
   unblockUser,
@@ -49,7 +45,6 @@ import {
   addProfileMonitor,
   CHECK_INTERVAL_HOURS,
   listUserMonitors,
-  MAX_MONITORS_PER_USER,
   removeProfileMonitor,
   startMonitorLoop,
   userMonitorCount,
@@ -90,7 +85,6 @@ function getBaseCommands(locale: string) {
     { command: 'start', description: t(locale, 'cmd.start') },
     { command: 'help', description: t(locale, 'cmd.help') },
     { command: 'queue', description: t(locale, 'cmd.queue') },
-    { command: 'invite', description: t(locale, 'cmd.invite') },
     { command: 'profile', description: t(locale, 'cmd.profile') },
     { command: 'monitor', description: t(locale, 'cmd.monitor') },
     { command: 'unmonitor', description: t(locale, 'cmd.unmonitor') },
@@ -202,22 +196,6 @@ function isActivated(userId: number): boolean {
 
 bot.start(async (ctx) => {
   await saveUser(ctx.from);
-  const payload = ctx.startPayload;
-  if (payload) {
-    const inviter = findInviterByCode(payload);
-    if (inviter && inviter !== String(ctx.from.id)) {
-      recordReferral(inviter, String(ctx.from.id));
-      const total = countReferrals(inviter);
-      if (total % 5 === 0) {
-        try {
-          await ctx.telegram.sendMessage(
-            inviter,
-            t('en', 'referral.fiveUsers')
-          );
-        } catch {}
-      }
-    }
-  }
   const isAdmin = ctx.from.id === BOT_ADMIN_ID;
   const locale = ctx.from.language_code || 'en';
   const msg = t(locale, 'start.instructions');
@@ -232,7 +210,6 @@ bot.command('help', async (ctx) => {
     cmdStart: t(locale, 'cmd.start'),
     cmdHelp: t(locale, 'cmd.help'),
     cmdQueue: t(locale, 'cmd.queue'),
-    cmdInvite: t(locale, 'cmd.invite'),
     cmdProfile: t(locale, 'cmd.profile'),
     cmdMonitor: t(locale, 'cmd.monitor'),
     cmdUnmonitor: t(locale, 'cmd.unmonitor'),
@@ -263,16 +240,6 @@ bot.command('queue', async (ctx) => {
   if (!isActivated(ctx.from.id)) return ctx.reply(t(locale, 'msg.startFirst'));
   const msg = await getQueueStatusForUser(String(ctx.from.id));
   await sendTemporaryMessage(bot, ctx.chat!.id, msg);
-});
-
-bot.command('invite', async (ctx) => {
-  const locale = ctx.from.language_code || 'en';
-  const code = getOrCreateInviteCode(String(ctx.from.id));
-  const botUser = bot.botInfo?.username || 'stories_xbot';
-  // Escape underscores in bot username for Markdown parsing
-  const escapedBotUser = botUser.replace(/_/g, '\\_');
-  const link = `https://t.me/${escapedBotUser}?start=${code}`;
-  await ctx.reply(t(locale, 'invite.msg', { link }));
 });
 
 bot.command('profile', async (ctx) => {
@@ -325,9 +292,7 @@ bot.command('monitor', async (ctx) => {
   if (args.length === 0) {
     const list = listUserMonitors(userId);
     if (list.length === 0) {
-      const limitMsg = isAdmin
-        ? t(locale, 'monitor.unlimited') + ' '
-        : t(locale, 'monitor.limitMsg', { max: MAX_MONITORS_PER_USER }) + ' ';
+      const limitMsg = t(locale, 'monitor.unlimited') + ' ';
       return ctx.reply(
         t(locale, 'monitor.usage', {
           limitMsg,
@@ -335,10 +300,9 @@ bot.command('monitor', async (ctx) => {
         })
       );
     }
-    const limit = isAdmin ? '∞' : MAX_MONITORS_PER_USER;
     const msg = t(locale, 'monitor.list', {
       count: list.length,
-      limit,
+      limit: '∞',
       list: list.map((m, i) => `${i + 1}. @${m.target_username}`).join('\n'),
       hours: CHECK_INTERVAL_HOURS,
     });
@@ -346,20 +310,9 @@ bot.command('monitor', async (ctx) => {
   }
   const input = args[0];
   const username = input.replace(/^@/, '');
-  if (!isAdmin) {
-    if (userMonitorCount(userId) >= MAX_MONITORS_PER_USER) {
-      return ctx.reply(
-        t(locale, 'monitor.limit', { max: MAX_MONITORS_PER_USER })
-      );
-    }
-  }
+  // All users can now monitor unlimited profiles
   addProfileMonitor(userId, username);
-  const currentCount = userMonitorCount(userId);
-  const remainingText = isAdmin
-    ? t(locale, 'monitor.unlimited')
-    : t(locale, 'monitor.remaining', {
-        count: Math.max(MAX_MONITORS_PER_USER - currentCount, 0),
-      });
+  const remainingText = t(locale, 'monitor.unlimited');
   await ctx.reply(
     t(locale, 'monitor.started', { user: input, remaining: remainingText })
   );
@@ -478,7 +431,9 @@ bot.command('blocklist', async (ctx) => {
     let msg = t(locale, 'blocked.usersHeader', { count: rows.length }) + '\n';
     rows.forEach((u, i) => {
       const type = u.is_bot ? t(locale, 'label.bot') : t(locale, 'label.user');
-      msg += `${i + 1}. ${u.telegram_id} [${type}] at ${new Date(u.blocked_at * 1000).toLocaleDateString()}\n`;
+      msg += `${i + 1}. ${u.telegram_id} [${type}] at ${new Date(
+        u.blocked_at * 1000
+      ).toLocaleDateString()}\n`;
     });
     await ctx.reply(msg);
   } catch (error) {
@@ -502,7 +457,9 @@ bot.command('users', async (ctx) => {
         ? t(locale, 'label.premium')
         : t(locale, 'label.free');
       const type = u.is_bot ? t(locale, 'label.bot') : t(locale, 'label.user');
-      msg += `${i + 1}. ${u.username ? '@' + u.username : u.telegram_id} [${premiumLabel}, ${type}]`;
+      msg += `${i + 1}. ${
+        u.username ? '@' + u.username : u.telegram_id
+      } [${premiumLabel}, ${type}]`;
       msg += '\n';
     });
     await ctx.reply(msg);
@@ -524,7 +481,9 @@ bot.command('history', async (ctx) => {
       const date = new Date(r.enqueued_ts * 1000).toLocaleDateString();
       const user = r.username ? `@${r.username}` : r.telegram_id;
       const type = r.is_bot ? t(locale, 'label.bot') : t(locale, 'label.user');
-      msg += `${i + 1}. ${user} [${type}] -> ${r.target_username} [${r.status}] ${date}\n`;
+      msg += `${i + 1}. ${user} [${type}] -> ${r.target_username} [${
+        r.status
+      }] ${date}\n`;
     });
     await ctx.reply(msg, { link_preview_options: { is_disabled: true } });
   } catch (error) {

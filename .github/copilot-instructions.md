@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This is a **Telegram Stories Viewer Bot** that allows users to view Telegram stories anonymously using both a bot (Telegraf) and userbot (GramJS). The bot supports premium features, Bitcoin payments, profile monitoring, and story downloading with a sophisticated queue system.
+This is a **Telegram Stories Viewer Bot** that allows users to view Telegram stories anonymously using both a bot (Telegraf) and userbot (GramJS). The bot supports story downloading with a sophisticated queue system and profile monitoring for all users.
 
 ## Architecture & Key Technologies
 
@@ -11,7 +11,6 @@ This is a **Telegram Stories Viewer Bot** that allows users to view Telegram sto
 - **Userbot**: GramJS for Telegram Client API (MTProto)
 - **State Management**: Effector for business logic and effects
 - **Database**: Better-SQLite3 for local data persistence
-- **Payment**: Bitcoin integration with blockchain verification
 - **Queue System**: Custom job queue with timeout handling
 - **Internationalization**: Multi-language support (13 languages)
 - **Testing**: Jest with comprehensive test coverage
@@ -60,9 +59,9 @@ export const enqueueDownloadFx = createEffect(
     return db.enqueueDownload(
       params.telegram_id,
       params.target_username,
-      params.task_details,
+      params.task_details
     );
-  },
+  }
 );
 ```
 
@@ -95,15 +94,14 @@ await ctx.reply(t(locale, 'error.generic'));
 
 ### 1. Bot Commands Structure
 
-- **Base Commands**: Available to all users (start, help, premium, etc.)
-- **Premium Commands**: Monitor/unmonitor functionality
+- **Base Commands**: Available to all users (start, help, profile, monitor, etc.)
 - **Admin Commands**: User management, statistics, system control
 
 ### 2. Queue System (`services/queue-manager.ts`)
 
 - Handles story download requests with priority and rate limiting
 - Implements timeout protection (10 minutes for regular, 5 for paginated)
-- Supports cooldown periods (12h free, 2h premium, 0h admin)
+- Supports cooldown periods (reduced for all users)
 - Uses database-backed persistence
 
 ### 3. Story Processing Pipeline
@@ -113,12 +111,11 @@ await ctx.reply(t(locale, 'error.generic'));
 3. `send-stories.ts` - Orchestrate sending to users
 4. `send-{active,pinned,particular,paginated}-stories.ts` - Specialized senders
 
-### 4. Premium System
+### 4. Profile Monitoring System
 
-- Free trial system
-- Bitcoin payment verification
-- Profile monitoring (5 profiles for premium, unlimited for admin)
-- Reduced cooldowns and priority queue access
+- All users can monitor profiles for new stories
+- Each monitored account is checked every 6 hours on its own schedule
+- Admin users have unlimited monitoring slots
 
 ### 5. Userbot Integration
 
@@ -132,7 +129,7 @@ await ctx.reply(t(locale, 'error.generic'));
 
 When adding new commands:
 
-1. Add to appropriate command list (`getBaseCommands`, `getPremiumCommands`, `getAdminCommands`)
+1. Add to appropriate command list (`getBaseCommands`, `getAdminCommands`)
 2. Implement handler with proper authorization checks
 3. Add internationalization keys to all locale files
 4. Update command descriptions and help text
@@ -179,7 +176,6 @@ Essential environment variables:
 - `USERBOT_API_ID`, `USERBOT_API_HASH` - Telegram API credentials
 - `USERBOT_PHONE_NUMBER` - Phone number for userbot
 - `BOT_ADMIN_ID` - Admin user Telegram ID
-- Bitcoin wallet configuration (one of: `BTC_WALLET_ADDRESS`, `BTC_XPUB`, `BTC_YPUB`, `BTC_ZPUB`)
 
 ## Performance Considerations
 
@@ -204,7 +200,6 @@ Essential environment variables:
 const locale = ctx.from?.language_code || 'en';
 const userId = String(ctx.from.id);
 const isAdmin = ctx.from.id === BOT_ADMIN_ID;
-const isPremium = isUserPremium(userId);
 ```
 
 ### Database Effect Usage
@@ -238,12 +233,11 @@ notifyAdmin({
 4. Add internationalization support
 5. Write tests for critical paths
 6. Update documentation
-7. Consider premium vs free user implications
-8. Implement proper logging and monitoring
+7. Implement proper logging and monitoring
 
 ## Build & Deployment
 
-- Build: `yarn build` (TypeScript compilation + alias resolution)
-- Lint: `yarn lint` (ESLint with custom rules)
-- Test: `yarn test` (Jest with path mapping)
+- Build: `npm run build` (TypeScript compilation + alias resolution)
+- Lint: `npm run lint` (ESLint with custom rules)
+- Test: `npm run test` (Jest with path mapping)
 - Production: Docker container with PM2 process management

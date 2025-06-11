@@ -82,71 +82,6 @@ db.exec(`
   );
 `);
 
-// Payments table for BTC invoices
-db.exec(`
-  CREATE TABLE IF NOT EXISTS payments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT NOT NULL,
-    invoice_amount REAL NOT NULL,
-    user_address TEXT NOT NULL,
-    address_index INTEGER,
-    from_address TEXT,
-    paid_amount REAL DEFAULT 0,
-    expires_at INTEGER,
-  paid_at INTEGER
-  );
-`);
-
-const paymentColumns = db.prepare('PRAGMA table_info(payments)').all() as any[];
-if (!paymentColumns.some((c) => c.name === 'from_address')) {
-  db.exec('ALTER TABLE payments ADD COLUMN from_address TEXT');
-}
-if (!paymentColumns.some((c) => c.name === 'address_index')) {
-  db.exec('ALTER TABLE payments ADD COLUMN address_index INTEGER');
-}
-
-// Wallet state table for HD wallet index persistence
-db.exec(`
-  CREATE TABLE IF NOT EXISTS wallet_state (
-    id INTEGER PRIMARY KEY CHECK (id = 0),
-    next_index INTEGER DEFAULT 0
-  );
-`);
-const walletRow = db
-  .prepare('SELECT next_index FROM wallet_state WHERE id = 0')
-  .get() as any;
-if (!walletRow) {
-  db.prepare('INSERT INTO wallet_state (id, next_index) VALUES (0, 0)').run();
-}
-
-export function reserveAddressIndex(): number {
-  const row = db
-    .prepare('SELECT next_index FROM wallet_state WHERE id = 0')
-    .get() as any;
-  const idx = row?.next_index ?? 0;
-  db.prepare('UPDATE wallet_state SET next_index = ? WHERE id = 0').run(
-    idx + 1
-  );
-  return idx;
-}
-
-// Table to store used transaction ids
-db.exec(`
-  CREATE TABLE IF NOT EXISTS payment_txids (
-    invoice_id INTEGER NOT NULL,
-    txid TEXT NOT NULL UNIQUE
-  );
-`);
-
-// Payment checks table to persist pending invoice checks across restarts
-db.exec(`
-  CREATE TABLE IF NOT EXISTS payment_checks (
-    invoice_id INTEGER PRIMARY KEY,
-    next_check INTEGER NOT NULL,
-    check_start INTEGER NOT NULL
-  );
-`);
-
 // Blocked users table
 db.exec(`
   CREATE TABLE IF NOT EXISTS blocked_users (
@@ -179,33 +114,6 @@ db.exec(`
   );
 `);
 
-// Track last /verify command per user
-db.exec(`
-  CREATE TABLE IF NOT EXISTS verify_attempts (
-    telegram_id TEXT PRIMARY KEY,
-    last_attempt INTEGER NOT NULL
-  );
-`);
-
-// Invitation codes table - maps each user to a unique code they can share
-db.exec(`
-  CREATE TABLE IF NOT EXISTS invite_codes (
-    user_id TEXT PRIMARY KEY,
-    code TEXT NOT NULL UNIQUE,
-    created_at INTEGER DEFAULT (strftime('%s','now'))
-  );
-`);
-
-// Referrals table - tracks who invited whom and reward status
-db.exec(`
-  CREATE TABLE IF NOT EXISTS referrals (
-    inviter_id TEXT NOT NULL,
-    new_user_id TEXT PRIMARY KEY,
-    paid_rewarded INTEGER DEFAULT 0,
-    created_at INTEGER DEFAULT (strftime('%s','now'))
-  );
-`);
-
 // Track invalid link violations and temporary suspensions
 db.exec(`
   CREATE TABLE IF NOT EXISTS invalid_link_violations (
@@ -233,7 +141,7 @@ export function enqueueDownload(
   telegram_id: string,
   target_username: string,
   task_details: UserInfo,
-  delaySeconds = 0
+  delaySeconds = 0,
 ): number {
   const now = Math.floor(Date.now() / 1000) + delaySeconds;
   const detailsJson = JSON.stringify(task_details); // Convert object to JSON string for storage.
@@ -257,7 +165,7 @@ export function getNextQueueItem(): DownloadQueueItem | null {
     WHERE q.status = 'pending'
     ORDER BY u.is_premium DESC, q.enqueued_ts ASC
     LIMIT 1
-  `
+  `,
     )
     .get();
 
@@ -303,19 +211,19 @@ export function resetStuckJobs(): void {
 
 export function markProcessing(id: string): void {
   db.prepare(
-    `UPDATE download_queue SET status = 'processing' WHERE id = ?`
+    `UPDATE download_queue SET status = 'processing' WHERE id = ?`,
   ).run(id);
 }
 
 export function markDone(id: string): void {
   db.prepare(
-    `UPDATE download_queue SET status = 'done', processed_ts = ? WHERE id = ?`
+    `UPDATE download_queue SET status = 'done', processed_ts = ? WHERE id = ?`,
   ).run(Math.floor(Date.now() / 1000), id);
 }
 
 export function markError(id: string, error: string): void {
   db.prepare(
-    `UPDATE download_queue SET status = 'error', error = ?, processed_ts = ? WHERE id = ?`
+    `UPDATE download_queue SET status = 'error', error = ?, processed_ts = ? WHERE id = ?`,
   ).run(error, Math.floor(Date.now() / 1000), id);
 }
 
@@ -324,7 +232,7 @@ export function cleanupQueue(): void {
     `
     DELETE FROM download_queue
     WHERE processed_ts IS NOT NULL AND processed_ts < (strftime('%s','now') - 2592000)
-  `
+  `,
   ).run();
 }
 
@@ -351,7 +259,7 @@ export function getRecentHistory(limit: number): any[] {
        LEFT JOIN users u ON u.telegram_id = q.telegram_id
        WHERE q.enqueued_ts > (strftime('%s','now') - 2592000)
        ORDER BY q.enqueued_ts DESC
-       LIMIT ?`
+       LIMIT ?`,
     )
     .all(limit);
 }
@@ -359,7 +267,7 @@ export function getRecentHistory(limit: number): any[] {
 export function wasRecentlyDownloaded(
   telegram_id: string,
   target_username: string,
-  hours: number
+  hours: number,
 ): boolean {
   if (hours <= 0) return false;
   const cutoff = Math.floor(Date.now() / 1000) - hours * 3600;
@@ -369,7 +277,7 @@ export function wasRecentlyDownloaded(
     SELECT id FROM download_queue
     WHERE telegram_id = ? AND target_username = ? AND status = 'done' AND processed_ts > ?
     LIMIT 1
-  `
+  `,
     )
     .get(telegram_id, target_username, cutoff);
   return Boolean(row);
@@ -378,7 +286,7 @@ export function wasRecentlyDownloaded(
 export function getDownloadCooldownRemaining(
   telegram_id: string,
   target_username: string,
-  hours: number
+  hours: number,
 ): number {
   if (hours <= 0) return 0;
   const row = db
@@ -386,7 +294,7 @@ export function getDownloadCooldownRemaining(
       `SELECT processed_ts FROM download_queue
        WHERE telegram_id = ? AND target_username = ? AND status = 'done'
        ORDER BY processed_ts DESC
-       LIMIT 1`
+       LIMIT 1`,
     )
     .get(telegram_id, target_username) as { processed_ts: number } | undefined;
   if (!row) return 0;
@@ -397,23 +305,23 @@ export function getDownloadCooldownRemaining(
 
 export function recordProfileRequest(
   telegram_id: string,
-  target_username: string
+  target_username: string,
 ): void {
   db.prepare(
-    `INSERT INTO profile_requests (telegram_id, target_username, requested_at) VALUES (?, ?, strftime('%s','now'))`
+    `INSERT INTO profile_requests (telegram_id, target_username, requested_at) VALUES (?, ?, strftime('%s','now'))`,
   ).run(telegram_id, target_username);
 }
 
 export function wasProfileRequestedRecently(
   telegram_id: string,
   target_username: string,
-  hours: number
+  hours: number,
 ): boolean {
   if (hours <= 0) return false;
   const cutoff = Math.floor(Date.now() / 1000) - hours * 3600;
   const row = db
     .prepare(
-      `SELECT 1 FROM profile_requests WHERE telegram_id = ? AND target_username = ? AND requested_at > ? LIMIT 1`
+      `SELECT 1 FROM profile_requests WHERE telegram_id = ? AND target_username = ? AND requested_at > ? LIMIT 1`,
     )
     .get(telegram_id, target_username, cutoff);
   return Boolean(row);
@@ -422,7 +330,7 @@ export function wasProfileRequestedRecently(
 export function getProfileRequestCooldownRemaining(
   telegram_id: string,
   target_username: string,
-  hours: number
+  hours: number,
 ): number {
   if (hours <= 0) return 0;
   const row = db
@@ -430,7 +338,7 @@ export function getProfileRequestCooldownRemaining(
       `SELECT requested_at FROM profile_requests
        WHERE telegram_id = ? AND target_username = ?
        ORDER BY requested_at DESC
-       LIMIT 1`
+       LIMIT 1`,
     )
     .get(telegram_id, target_username) as { requested_at: number } | undefined;
   if (!row) return 0;
@@ -442,7 +350,7 @@ export function getProfileRequestCooldownRemaining(
 export function isDuplicatePending(
   telegram_id: string,
   target_username: string,
-  nextStoriesIds?: number[]
+  nextStoriesIds?: number[],
 ): boolean {
   if (nextStoriesIds && nextStoriesIds.length > 0) {
     const row = db
@@ -452,7 +360,7 @@ export function isDuplicatePending(
            AND target_username = ?
            AND json_extract(task_details, '$.nextStoriesIds') = json(?)
            AND (status = 'pending' OR status = 'processing')
-         LIMIT 1`
+         LIMIT 1`,
       )
       .get(telegram_id, target_username, JSON.stringify(nextStoriesIds));
     return Boolean(row);
@@ -462,7 +370,7 @@ export function isDuplicatePending(
     .prepare(
       `SELECT id FROM download_queue
        WHERE telegram_id = ? AND target_username = ? AND (status = 'pending' OR status = 'processing')
-       LIMIT 1`
+       LIMIT 1`,
     )
     .get(telegram_id, target_username);
   return Boolean(row);
@@ -471,7 +379,7 @@ export function isDuplicatePending(
 export function findPendingJobId(telegram_id: string): number | undefined {
   const row = db
     .prepare(
-      `SELECT id FROM download_queue WHERE telegram_id = ? AND status = 'pending' ORDER BY enqueued_ts ASC LIMIT 1`
+      `SELECT id FROM download_queue WHERE telegram_id = ? AND status = 'pending' ORDER BY enqueued_ts ASC LIMIT 1`,
     )
     .get(telegram_id) as { id?: number } | undefined;
   return row?.id;
@@ -483,7 +391,7 @@ export function getQueueStats(jobId: number): {
 } {
   const job = db
     .prepare(
-      `SELECT q.enqueued_ts, IFNULL(u.is_premium,0) as is_premium FROM download_queue q LEFT JOIN users u ON u.telegram_id = q.telegram_id WHERE q.id = ?`
+      `SELECT q.enqueued_ts, IFNULL(u.is_premium,0) as is_premium FROM download_queue q LEFT JOIN users u ON u.telegram_id = q.telegram_id WHERE q.id = ?`,
     )
     .get(jobId) as { enqueued_ts: number; is_premium: number } | undefined;
 
@@ -491,13 +399,13 @@ export function getQueueStats(jobId: number): {
 
   const ahead = db
     .prepare(
-      `SELECT COUNT(*) as c FROM download_queue q LEFT JOIN users u ON u.telegram_id = q.telegram_id WHERE q.status = 'pending' AND (u.is_premium > @p OR (u.is_premium = @p AND q.enqueued_ts < @t))`
+      `SELECT COUNT(*) as c FROM download_queue q LEFT JOIN users u ON u.telegram_id = q.telegram_id WHERE q.status = 'pending' AND (u.is_premium > @p OR (u.is_premium = @p AND q.enqueued_ts < @t))`,
     )
     .get({ p: job.is_premium, t: job.enqueued_ts }) as { c: number };
 
   const processing = db
     .prepare(
-      `SELECT COUNT(*) as c FROM download_queue WHERE status = 'processing'`
+      `SELECT COUNT(*) as c FROM download_queue WHERE status = 'processing'`,
     )
     .get() as { c: number };
 
@@ -505,7 +413,7 @@ export function getQueueStats(jobId: number): {
 
   const avgRow = db
     .prepare(
-      `SELECT AVG(processed_ts - enqueued_ts) as avg FROM download_queue WHERE processed_ts IS NOT NULL`
+      `SELECT AVG(processed_ts - enqueued_ts) as avg FROM download_queue WHERE processed_ts IS NOT NULL`,
     )
     .get() as { avg: number | null };
   const avg = avgRow && avgRow.avg ? avgRow.avg : 30;
@@ -523,12 +431,12 @@ export interface MonitorRow {
 
 export function addMonitor(
   telegram_id: string,
-  target_username: string
+  target_username: string,
 ): MonitorRow {
   const result = db
     .prepare(
       `INSERT INTO monitors (telegram_id, target_username)
-       VALUES (?, ?)`
+       VALUES (?, ?)`,
     )
     .run(telegram_id, target_username);
 
@@ -542,10 +450,10 @@ export function addMonitor(
 
 export function removeMonitor(
   telegram_id: string,
-  target_username: string
+  target_username: string,
 ): void {
   db.prepare(
-    `DELETE FROM monitors WHERE telegram_id = ? AND target_username = ?`
+    `DELETE FROM monitors WHERE telegram_id = ? AND target_username = ?`,
   ).run(telegram_id, target_username);
 }
 
@@ -567,11 +475,11 @@ export function getMonitor(id: number): MonitorRow | undefined {
 
 export function findMonitor(
   telegram_id: string,
-  target_username: string
+  target_username: string,
 ): MonitorRow | undefined {
   return db
     .prepare(
-      `SELECT * FROM monitors WHERE telegram_id = ? AND target_username = ?`
+      `SELECT * FROM monitors WHERE telegram_id = ? AND target_username = ?`,
     )
     .get(telegram_id, target_username) as MonitorRow | undefined;
 }
@@ -586,14 +494,14 @@ export function countMonitors(telegram_id: string): number {
 export function getDueMonitors(cutoff: number): MonitorRow[] {
   return db
     .prepare(
-      `SELECT * FROM monitors WHERE last_checked IS NULL OR last_checked < ?`
+      `SELECT * FROM monitors WHERE last_checked IS NULL OR last_checked < ?`,
     )
     .all(cutoff) as MonitorRow[];
 }
 
 export function updateMonitorChecked(id: number): void {
   db.prepare(
-    `UPDATE monitors SET last_checked = strftime('%s','now') WHERE id = ?`
+    `UPDATE monitors SET last_checked = strftime('%s','now') WHERE id = ?`,
   ).run(id);
 }
 
@@ -601,10 +509,10 @@ export function updateMonitorChecked(id: number): void {
 export function markStorySent(
   monitor_id: number,
   story_id: number,
-  expires_at: number
+  expires_at: number,
 ): void {
   db.prepare(
-    `INSERT OR REPLACE INTO monitor_sent_stories (monitor_id, story_id, expires_at) VALUES (?, ?, ?)`
+    `INSERT OR REPLACE INTO monitor_sent_stories (monitor_id, story_id, expires_at) VALUES (?, ?, ?)`,
   ).run(monitor_id, story_id, expires_at);
 }
 
@@ -612,7 +520,7 @@ export function listSentStoryIds(monitor_id: number): number[] {
   const now = Math.floor(Date.now() / 1000);
   const rows = db
     .prepare(
-      `SELECT story_id FROM monitor_sent_stories WHERE monitor_id = ? AND expires_at > ?`
+      `SELECT story_id FROM monitor_sent_stories WHERE monitor_id = ? AND expires_at > ?`,
     )
     .all(monitor_id, now) as { story_id: number }[];
   return rows.map((r) => r.story_id);
@@ -621,134 +529,6 @@ export function listSentStoryIds(monitor_id: number): number[] {
 export function cleanupExpiredSentStories(): void {
   const now = Math.floor(Date.now() / 1000);
   db.prepare(`DELETE FROM monitor_sent_stories WHERE expires_at <= ?`).run(now);
-}
-
-// ----- Payment utils -----
-export interface PaymentRow {
-  id: number;
-  user_id: string;
-  invoice_amount: number;
-  user_address: string;
-  address_index?: number | null;
-  from_address?: string | null;
-  paid_amount: number;
-  expires_at?: number;
-  paid_at?: number | null;
-}
-
-export function insertInvoice(
-  user_id: string,
-  invoice_amount: number,
-  user_address: string,
-  address_index: number | null,
-  expires_at: number,
-  from_address?: string | null
-): PaymentRow {
-  const result = db
-    .prepare(
-      `INSERT INTO payments (user_id, invoice_amount, user_address, address_index, from_address, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    )
-    .run(
-      user_id,
-      invoice_amount,
-      user_address,
-      address_index,
-      from_address ?? null,
-      expires_at
-    );
-
-  const id = Number(result.lastInsertRowid);
-  return getInvoice(id)!;
-}
-
-export function updatePaidAmount(id: number, amount: number): void {
-  db.prepare(
-    `UPDATE payments SET paid_amount = paid_amount + ? WHERE id = ?`
-  ).run(amount, id);
-}
-
-export function updateFromAddress(id: number, from_address: string): void {
-  db.prepare(`UPDATE payments SET from_address = ? WHERE id = ?`).run(
-    from_address,
-    id
-  );
-}
-
-export function markInvoicePaid(id: number): void {
-  db.prepare(
-    `UPDATE payments SET paid_at = strftime('%s','now') WHERE id = ?`
-  ).run(id);
-}
-
-export function getInvoice(id: number): PaymentRow | undefined {
-  return db.prepare(`SELECT * FROM payments WHERE id = ?`).get(id) as
-    | PaymentRow
-    | undefined;
-}
-
-export function getPendingInvoiceByAddress(
-  address: string
-): PaymentRow | undefined {
-  return db
-    .prepare(
-      `SELECT * FROM payments WHERE user_address = ? AND paid_at IS NULL ORDER BY id DESC LIMIT 1`
-    )
-    .get(address) as PaymentRow | undefined;
-}
-
-export function getActiveInvoiceForUser(
-  user_id: string
-): PaymentRow | undefined {
-  const now = Math.floor(Date.now() / 1000);
-  return db
-    .prepare(
-      `SELECT * FROM payments WHERE user_id = ? AND paid_at IS NULL AND expires_at > ? ORDER BY id DESC LIMIT 1`
-    )
-    .get(user_id, now) as PaymentRow | undefined;
-}
-
-// ----- Payment txid utils -----
-export function recordTxid(invoice_id: number, txid: string): void {
-  db.prepare(
-    `INSERT OR IGNORE INTO payment_txids (invoice_id, txid) VALUES (?, ?)`
-  ).run(invoice_id, txid);
-}
-
-export function isTxidUsed(txid: string): boolean {
-  const row = db
-    .prepare(`SELECT 1 FROM payment_txids WHERE txid = ?`)
-    .get(txid);
-  return Boolean(row);
-}
-
-// ----- Payment check persistence -----
-export interface PaymentCheckRow {
-  invoice_id: number;
-  next_check: number;
-  check_start: number;
-}
-
-export function upsertPaymentCheck(
-  invoice_id: number,
-  next_check: number,
-  check_start?: number
-): void {
-  db.prepare(
-    `INSERT INTO payment_checks (invoice_id, next_check, check_start)
-     VALUES (?, ?, ?)
-     ON CONFLICT(invoice_id) DO UPDATE SET next_check = excluded.next_check`
-  ).run(invoice_id, next_check, check_start ?? Math.floor(Date.now() / 1000));
-}
-
-export function deletePaymentCheck(invoice_id: number): void {
-  db.prepare(`DELETE FROM payment_checks WHERE invoice_id = ?`).run(invoice_id);
-}
-
-export function listPaymentChecks(): PaymentCheckRow[] {
-  return db
-    .prepare(`SELECT invoice_id, next_check, check_start FROM payment_checks`)
-    .all() as PaymentCheckRow[];
 }
 
 // ----- Blocked users utils -----
@@ -760,13 +540,13 @@ export interface BlockedUserRow {
 
 export function blockUser(telegram_id: string, is_bot = false): void {
   db.prepare(
-    `INSERT OR REPLACE INTO blocked_users (telegram_id, blocked_at, is_bot) VALUES (?, strftime('%s','now'), ?)`
+    `INSERT OR REPLACE INTO blocked_users (telegram_id, blocked_at, is_bot) VALUES (?, strftime('%s','now'), ?)`,
   ).run(telegram_id, is_bot ? 1 : 0);
 }
 
 export function unblockUser(telegram_id: string): void {
   db.prepare(`DELETE FROM blocked_users WHERE telegram_id = ?`).run(
-    telegram_id
+    telegram_id,
   );
 }
 
@@ -786,18 +566,18 @@ export function listBlockedUsers(): BlockedUserRow[] {
 // ----- Rate limiting utils -----
 export function recordUserRequest(telegram_id: string): void {
   db.prepare(
-    `INSERT INTO user_request_log (telegram_id, requested_at) VALUES (?, strftime('%s','now'))`
+    `INSERT INTO user_request_log (telegram_id, requested_at) VALUES (?, strftime('%s','now'))`,
   ).run(telegram_id);
 }
 
 export function countRecentUserRequests(
   telegram_id: string,
-  windowSeconds: number
+  windowSeconds: number,
 ): number {
   const cutoff = Math.floor(Date.now() / 1000) - windowSeconds;
   const row = db
     .prepare(
-      `SELECT COUNT(*) as c FROM user_request_log WHERE telegram_id = ? AND requested_at > ?`
+      `SELECT COUNT(*) as c FROM user_request_log WHERE telegram_id = ? AND requested_at > ?`,
     )
     .get(telegram_id, cutoff) as { c: number };
   return row.c || 0;
@@ -806,78 +586,10 @@ export function countRecentUserRequests(
 export function countPendingJobs(telegram_id: string): number {
   const row = db
     .prepare(
-      `SELECT COUNT(*) as c FROM download_queue WHERE telegram_id = ? AND status IN ('pending','processing')`
+      `SELECT COUNT(*) as c FROM download_queue WHERE telegram_id = ? AND status IN ('pending','processing')`,
     )
     .get(telegram_id) as { c: number };
   return row.c || 0;
-}
-
-export function getLastVerifyAttempt(telegram_id: string): number | undefined {
-  const row = db
-    .prepare(`SELECT last_attempt FROM verify_attempts WHERE telegram_id = ?`)
-    .get(telegram_id) as { last_attempt: number } | undefined;
-  return row?.last_attempt;
-}
-
-export function updateVerifyAttempt(telegram_id: string): void {
-  db.prepare(
-    `INSERT INTO verify_attempts (telegram_id, last_attempt) VALUES (?, strftime('%s','now'))
-     ON CONFLICT(telegram_id) DO UPDATE SET last_attempt = excluded.last_attempt`
-  ).run(telegram_id);
-}
-
-// ----- Invitation/Referral utilities -----
-export function getOrCreateInviteCode(user_id: string): string {
-  const row = db
-    .prepare(`SELECT code FROM invite_codes WHERE user_id = ?`)
-    .get(user_id) as { code: string } | undefined;
-  if (row) return row.code;
-  const code = Math.random().toString(36).slice(2, 8);
-  db.prepare(`INSERT INTO invite_codes (user_id, code) VALUES (?, ?)`).run(
-    user_id,
-    code
-  );
-  return code;
-}
-
-export function findInviterByCode(code: string): string | undefined {
-  const row = db
-    .prepare(`SELECT user_id FROM invite_codes WHERE code = ?`)
-    .get(code) as { user_id: string } | undefined;
-  return row?.user_id;
-}
-
-export function recordReferral(inviter_id: string, new_user_id: string): void {
-  db.prepare(
-    `INSERT OR IGNORE INTO referrals (inviter_id, new_user_id) VALUES (?, ?)`
-  ).run(inviter_id, new_user_id);
-}
-
-export function countReferrals(inviter_id: string): number {
-  const row = db
-    .prepare(`SELECT COUNT(*) as c FROM referrals WHERE inviter_id = ?`)
-    .get(inviter_id) as { c: number };
-  return row.c || 0;
-}
-
-export function getInviterForUser(new_user_id: string): string | undefined {
-  const row = db
-    .prepare(`SELECT inviter_id FROM referrals WHERE new_user_id = ?`)
-    .get(new_user_id) as { inviter_id: string } | undefined;
-  return row?.inviter_id;
-}
-
-export function markReferralPaidRewarded(new_user_id: string): void {
-  db.prepare(
-    `UPDATE referrals SET paid_rewarded = 1 WHERE new_user_id = ?`
-  ).run(new_user_id);
-}
-
-export function wasReferralPaidRewarded(new_user_id: string): boolean {
-  const row = db
-    .prepare(`SELECT paid_rewarded FROM referrals WHERE new_user_id = ?`)
-    .get(new_user_id) as { paid_rewarded: number } | undefined;
-  return row?.paid_rewarded === 1;
 }
 
 // ===== Invalid link violation utilities =====
@@ -886,7 +598,7 @@ export function recordInvalidLink(telegram_id: string): number {
   db.prepare(
     `INSERT INTO invalid_link_violations (telegram_id, count)
      VALUES (?, 1)
-     ON CONFLICT(telegram_id) DO UPDATE SET count = count + 1`
+     ON CONFLICT(telegram_id) DO UPDATE SET count = count + 1`,
   ).run(telegram_id);
   const row = db
     .prepare('SELECT count FROM invalid_link_violations WHERE telegram_id = ?')
@@ -899,21 +611,21 @@ export function suspendUserTemp(telegram_id: string, seconds: number): void {
   db.prepare(
     `INSERT INTO invalid_link_violations (telegram_id, count, suspended_until)
      VALUES (?, 0, ?)
-     ON CONFLICT(telegram_id) DO UPDATE SET count = 0, suspended_until = ?`
+     ON CONFLICT(telegram_id) DO UPDATE SET count = 0, suspended_until = ?`,
   ).run(telegram_id, until, until);
 }
 
 export function getSuspensionRemaining(telegram_id: string): number {
   const row = db
     .prepare(
-      'SELECT suspended_until FROM invalid_link_violations WHERE telegram_id = ?'
+      'SELECT suspended_until FROM invalid_link_violations WHERE telegram_id = ?',
     )
     .get(telegram_id) as { suspended_until?: number } | undefined;
   if (!row?.suspended_until) return 0;
   const now = Math.floor(Date.now() / 1000);
   if (row.suspended_until <= now) {
     db.prepare(
-      'UPDATE invalid_link_violations SET suspended_until = NULL WHERE telegram_id = ?'
+      'UPDATE invalid_link_violations SET suspended_until = NULL WHERE telegram_id = ?',
     ).run(telegram_id);
     return 0;
   }
@@ -929,24 +641,8 @@ export function isUserTemporarilySuspended(telegram_id: string): boolean {
 export function countNewUsersSince(since: number): number {
   const row = db
     .prepare(
-      "SELECT COUNT(*) as c FROM users WHERE strftime('%s', created_at) > ?"
+      "SELECT COUNT(*) as c FROM users WHERE strftime('%s', created_at) > ?",
     )
-    .get(since) as { c: number } | undefined;
-  return row?.c || 0;
-}
-
-export function countPaymentsSince(since: number): number {
-  const row = db
-    .prepare(
-      'SELECT COUNT(*) as c FROM payments WHERE paid_at IS NOT NULL AND paid_at > ?'
-    )
-    .get(since) as { c: number } | undefined;
-  return row?.c || 0;
-}
-
-export function countReferralsSince(since: number): number {
-  const row = db
-    .prepare('SELECT COUNT(*) as c FROM referrals WHERE created_at > ?')
     .get(since) as { c: number } | undefined;
   return row?.c || 0;
 }
@@ -968,11 +664,11 @@ export function cleanupOldBugs(): void {
 export function addBugReport(
   telegram_id: string,
   description: string,
-  username?: string
+  username?: string,
 ): void {
   cleanupOldBugs();
   db.prepare(
-    `INSERT INTO bug_reports (telegram_id, username, description) VALUES (?, ?, ?)`
+    `INSERT INTO bug_reports (telegram_id, username, description) VALUES (?, ?, ?)`,
   ).run(telegram_id, username ?? null, description);
 }
 
@@ -980,7 +676,7 @@ export function listBugReports(): BugReportRow[] {
   cleanupOldBugs();
   return db
     .prepare(
-      `SELECT id, telegram_id, username, description, created_at FROM bug_reports ORDER BY created_at DESC`
+      `SELECT id, telegram_id, username, description, created_at FROM bug_reports ORDER BY created_at DESC`,
     )
     .all() as BugReportRow[];
 }
@@ -989,7 +685,7 @@ export function getLastBugReportTime(telegram_id: string): number | undefined {
   cleanupOldBugs();
   const row = db
     .prepare(
-      `SELECT created_at FROM bug_reports WHERE telegram_id = ? ORDER BY created_at DESC LIMIT 1`
+      `SELECT created_at FROM bug_reports WHERE telegram_id = ? ORDER BY created_at DESC LIMIT 1`,
     )
     .get(telegram_id) as { created_at: number } | undefined;
   return row?.created_at;
@@ -1000,20 +696,20 @@ export function countBugReportsLastDay(telegram_id: string): number {
   const cutoff = Math.floor(Date.now() / 1000) - 86400;
   const row = db
     .prepare(
-      `SELECT COUNT(*) as c FROM bug_reports WHERE telegram_id = ? AND created_at >= ?`
+      `SELECT COUNT(*) as c FROM bug_reports WHERE telegram_id = ? AND created_at >= ?`,
     )
     .get(telegram_id, cutoff) as { c: number } | undefined;
   return row?.c || 0;
 }
 
 export function getEarliestBugReportTimeLastDay(
-  telegram_id: string
+  telegram_id: string,
 ): number | undefined {
   cleanupOldBugs();
   const cutoff = Math.floor(Date.now() / 1000) - 86400;
   const row = db
     .prepare(
-      `SELECT MIN(created_at) as c FROM bug_reports WHERE telegram_id = ? AND created_at >= ?`
+      `SELECT MIN(created_at) as c FROM bug_reports WHERE telegram_id = ? AND created_at >= ?`,
     )
     .get(telegram_id, cutoff) as { c: number } | undefined;
   return row?.c;

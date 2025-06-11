@@ -3,7 +3,7 @@ import type { Config } from 'jest';
 const config: Config = {
   preset: 'ts-jest',
   testEnvironment: 'node',
-  testMatch: ['**/__tests__/**/*.test.ts'],
+  testMatch: ['**/tests/**/*.test.ts'],
   moduleNameMapper: {
     '^config/(.*)$': '<rootDir>/src/config/$1',
     '^controllers/(.*)$': '<rootDir>/src/controllers/$1',
@@ -15,7 +15,7 @@ const config: Config = {
     '^repositories/(.*)$': '<rootDir>/src/repositories/$1',
     '^types$': '<rootDir>/src/types.ts',
     '^index$': '<rootDir>/src/index.ts',
-    'p-limit': '<rootDir>/__mocks__/p-limit.js',
+    'p-limit': '<rootDir>/mocks/p-limit.js',
   },
 };
 

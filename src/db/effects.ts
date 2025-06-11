@@ -131,25 +131,9 @@ export const countPendingJobsFx = createEffect((telegram_id: string) =>
   db.countPendingJobs(telegram_id)
 );
 
-export const getLastVerifyAttemptFx = createEffect((telegram_id: string) =>
-  db.getLastVerifyAttempt(telegram_id)
-);
-
-export const updateVerifyAttemptFx = createEffect((telegram_id: string) =>
-  db.updateVerifyAttempt(telegram_id)
-);
-
 // Stats effect helpers
 export const countNewUsersSinceFx = createEffect((since: number) =>
   db.countNewUsersSince(since)
-);
-
-export const countPaymentsSinceFx = createEffect((since: number) =>
-  db.countPaymentsSince(since)
-);
-
-export const countReferralsSinceFx = createEffect((since: number) =>
-  db.countReferralsSince(since)
 );
 
 export const addBugReportFx = createEffect(

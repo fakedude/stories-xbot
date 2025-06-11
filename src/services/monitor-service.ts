@@ -1,4 +1,3 @@
-import { BOT_ADMIN_ID } from 'config/env-config';
 import { Userbot } from 'config/userbot';
 import { mapStories } from 'controllers/download-stories';
 import { sendActiveStories } from 'controllers/send-active-stories';
@@ -19,10 +18,9 @@ import {
   removeMonitor,
   updateMonitorChecked,
 } from '../db';
-import { isUserPremium } from './premium-service';
 
 export const CHECK_INTERVAL_HOURS = 6;
-export const MAX_MONITORS_PER_USER = 5;
+// No more monitor limits - all users can monitor unlimited profiles
 
 const monitorTimers = new Map<number, NodeJS.Timeout>();
 
@@ -59,7 +57,7 @@ async function fetchActiveStories(username: string) {
   const client = await Userbot.getInstance();
   const entity = await client.getEntity(username);
   const activeResult = await client.invoke(
-    new Api.stories.GetPeerStories({ peer: entity })
+    new Api.stories.GetPeerStories({ peer: entity }),
   );
   return mapStories(activeResult.stories?.stories || []);
 }
@@ -81,8 +79,7 @@ async function checkSingleMonitor(id: number) {
     linkType: 'username',
     locale: '',
     initTime: Date.now(),
-    isPremium:
-      isUserPremium(m.telegram_id) || m.telegram_id === BOT_ADMIN_ID.toString(),
+    isPremium: true, // All users have full access now
   };
 
   const mapped = await fetchActiveStories(task.link);
