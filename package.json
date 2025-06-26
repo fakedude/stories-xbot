@@ -16,7 +16,7 @@
     "test": "npx jest"
   },
   "dependencies": {
-    "better-sqlite3": "^11.10.0",
+    "better-sqlite3": "^12.1.1",
     "dotenv": "^16.5.0",
     "effector": "^23.3.0",
     "node-cron": "^3.0.3",
